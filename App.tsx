@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Video, Mic, MicOff, VideoOff, Phone, Copy, Check, ArrowRight, ShieldCheck, PhoneIncoming } from 'lucide-react';
+import { Video, Mic, MicOff, VideoOff, Phone, Copy, Check, ArrowRight, ShieldCheck, PhoneIncoming, Share2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -244,36 +244,44 @@ const App: React.FC = () => {
       </div>
 
       {/* Controls */}
-      <div className="fixed bottom-0 left-0 right-0 h-24 bg-gray-900 border-t border-gray-800 flex items-center justify-center gap-6 z-10">
-         <button onClick={toggleMic} className={`p-4 rounded-full transition-all ${isMicMuted ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}>
+      <div className="fixed bottom-0 left-0 right-0 h-24 bg-gray-900 border-t border-gray-800 flex items-center justify-center gap-4 md:gap-6 z-10 overflow-x-auto px-4">
+         <button onClick={toggleMic} className={`p-4 rounded-full transition-all flex-shrink-0 ${isMicMuted ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}>
             {isMicMuted ? <MicOff size={24} /> : <Mic size={24} />}
          </button>
          
          {!peerRef.current ? (
             <>
-              <button onClick={createOffer} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all">
+              <button onClick={createOffer} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
                   <Phone size={20} />
-                  <span>Tạo cuộc gọi</span>
+                  <span className="hidden md:inline">Tạo cuộc gọi</span>
               </button>
-              <button onClick={handleJoinCall} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all">
+              <button onClick={handleJoinCall} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
                   <PhoneIncoming size={20} />
-                  <span>Nhập mã gọi</span>
+                  <span className="hidden md:inline">Nhập mã gọi</span>
               </button>
             </>
          ) : (
-             <button onClick={() => { peerRef.current?.close(); window.location.reload(); }} className="p-4 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20">
+             <button onClick={() => { peerRef.current?.close(); window.location.reload(); }} className="p-4 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20 flex-shrink-0">
                 <Phone size={24} className="rotate-[135deg]" />
              </button>
          )}
 
         {peerRef.current && peerRef.current.connectionState !== 'connected' && peerRef.current.localDescription?.type === 'offer' && (
-             <button onClick={handleCompleteConnection} className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-semibold transition-all">
+             <button onClick={handleCompleteConnection} className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-semibold transition-all flex-shrink-0">
                 <Check size={20} />
-                <span>Xác nhận trả lời</span>
+                <span className="hidden md:inline">Xác nhận trả lời</span>
              </button>
         )}
 
-         <button onClick={toggleVideo} className={`p-4 rounded-full transition-all ${isVideoOff ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}>
+        {/* Share Button - Visible when there is SDP data but not fully connected */}
+        {sdpData && peerRef.current && peerRef.current.connectionState !== 'connected' && (
+            <button onClick={copyToClipboard} className="flex items-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-full font-semibold transition-all flex-shrink-0" title="Sao chép mã kết nối">
+                <Share2 size={20} />
+                <span className="hidden md:inline">Chia sẻ mã</span>
+            </button>
+        )}
+
+         <button onClick={toggleVideo} className={`p-4 rounded-full transition-all flex-shrink-0 ${isVideoOff ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}>
             {isVideoOff ? <VideoOff size={24} /> : <Video size={24} />}
          </button>
       </div>
