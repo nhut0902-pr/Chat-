@@ -1,0 +1,8 @@
+{
+  "name": "WebRTC Video Call",
+  "description": "A peer-to-peer video calling application using WebRTC.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
