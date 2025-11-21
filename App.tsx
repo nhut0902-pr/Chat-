@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Video, Mic, MicOff, VideoOff, Phone, Copy, Check, ArrowRight, ShieldCheck, PhoneIncoming, Share2 } from 'lucide-react';
+import { Video, Mic, MicOff, VideoOff, Phone, Copy, Check, ArrowRight, ShieldCheck, PhoneIncoming, Share2, Monitor } from 'lucide-react';
 
 const App: React.FC = () => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [status, setStatus] = useState<string>('Sẵn sàng');
   const [showModal, setShowModal] = useState<'offer' | 'answer' | 'receive' | null>(null);
   const [sdpData, setSdpData] = useState('');
@@ -13,6 +14,7 @@ const App: React.FC = () => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const peerRef = useRef<RTCPeerConnection | null>(null);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
 
   useEffect(() => {
     return () => {
@@ -25,7 +27,7 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const startCamera = async () => {
+  const startCamera = async (): Promise<MediaStream | null> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setLocalStream(stream);
@@ -33,22 +35,27 @@ const App: React.FC = () => {
         localVideoRef.current.srcObject = stream;
       }
       setStatus('Camera đã bật. Sẵn sàng kết nối.');
+      return stream;
     } catch (err) {
       console.error('Error accessing media devices:', err);
       setStatus('Lỗi: Không thể truy cập camera/micro.');
+      return null;
     }
   };
 
-  const setupPeerConnection = () => {
+  const setupPeerConnection = (stream: MediaStream | null) => {
     const peer = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
       ]
     });
 
-    if (localStream) {
-      localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+    if (stream) {
+      stream.getTracks().forEach(track => peer.addTrack(track, stream));
     }
 
     peer.ontrack = (event) => {
@@ -64,6 +71,7 @@ const App: React.FC = () => {
     };
 
     peer.onconnectionstatechange = () => {
+      console.log("Connection State:", peer.connectionState);
       switch (peer.connectionState) {
         case 'connected': setStatus('Đã kết nối'); break;
         case 'disconnected': setStatus('Mất kết nối'); break;
@@ -90,13 +98,17 @@ const App: React.FC = () => {
       setTimeout(() => {
           peer.removeEventListener('icegatheringstatechange', checkState);
           resolve();
-      }, 2000); 
+      }, 4000); // Increased timeout for better connectivity
     });
   };
 
   const createOffer = async () => {
-    if (!localStream) await startCamera();
-    const peer = setupPeerConnection();
+    let stream = localStream;
+    if (!stream) {
+        stream = await startCamera();
+    }
+    // Even if stream fails, we can try to connect (audio only or receive only), but here we assume stream is desired.
+    const peer = setupPeerConnection(stream);
     
     setStatus('Đang tạo mã mời...');
     const offer = await peer.createOffer();
@@ -110,8 +122,10 @@ const App: React.FC = () => {
     setStatus('Đã tạo mã mời. Hãy gửi cho bạn bè.');
   };
 
-  const handleJoinCall = () => {
-    if (!localStream) startCamera();
+  const handleJoinCall = async () => {
+    if (!localStream) {
+        await startCamera();
+    }
     setManualInput('');
     setShowModal('answer');
     setStatus('Dán mã mời từ bạn bè.');
@@ -119,8 +133,13 @@ const App: React.FC = () => {
 
   const createAnswer = async () => {
     try {
+      let stream = localStream;
+      if (!stream) {
+        stream = await startCamera();
+      }
+
       const offer = JSON.parse(manualInput);
-      const peer = setupPeerConnection();
+      const peer = setupPeerConnection(stream);
       
       await peer.setRemoteDescription(offer);
       const answer = await peer.createAnswer();
@@ -172,6 +191,81 @@ const App: React.FC = () => {
     }
   };
 
+  const startScreenShare = async () => {
+    if (!peerRef.current) return;
+    
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const screenTrack = screenStream.getVideoTracks()[0];
+      screenTrackRef.current = screenTrack;
+
+      const senders = peerRef.current.getSenders();
+      const videoSender = senders.find(s => s.track?.kind === 'video');
+      if (videoSender) {
+          await videoSender.replaceTrack(screenTrack);
+      }
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = screenStream;
+      }
+
+      // Listen for the "Stop sharing" floating button in browser
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      setIsScreenSharing(true);
+    } catch (e) {
+      console.error("Error starting screen share:", e);
+      stopScreenShare(); // Ensure cleanup if partial failure
+    }
+  };
+
+  const stopScreenShare = async () => {
+    try {
+        // Stop screen share stream tracks if they are running
+        if (screenTrackRef.current) {
+            screenTrackRef.current.stop();
+            screenTrackRef.current = null;
+        }
+        
+        // Revert to camera track
+        if (localStream && peerRef.current) {
+            const videoTrack = localStream.getVideoTracks()[0];
+            const senders = peerRef.current.getSenders();
+            const videoSender = senders.find(s => s.track?.kind === 'video');
+            if (videoSender && videoTrack) {
+                await videoSender.replaceTrack(videoTrack);
+            }
+            
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = localStream;
+            }
+            
+            // Re-apply current mute/video state to be safe
+            localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
+            localStream.getVideoTracks().forEach(t => t.enabled = !isVideoOff);
+        }
+        
+        setIsScreenSharing(false);
+    } catch (e) {
+        console.error("Error stopping screen share:", e);
+        setIsScreenSharing(false);
+        // Fallback: try to at least show local stream
+        if (localStream && localVideoRef.current) {
+            localVideoRef.current.srcObject = localStream;
+        }
+    }
+  };
+
+  const toggleScreenShare = () => {
+    if (isScreenSharing) {
+      stopScreenShare();
+    } else {
+      startScreenShare();
+    }
+  };
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(sdpData);
     setStatus('Đã sao chép vào bộ nhớ tạm!');
@@ -202,22 +296,23 @@ const App: React.FC = () => {
             autoPlay
             muted
             playsInline
-            className={`w-full h-full object-cover transform scale-x-[-1] ${!localStream ? 'hidden' : ''}`}
+            // Don't mirror if screen sharing, otherwise text is backwards
+            className={`w-full h-full object-cover ${!isScreenSharing ? 'transform scale-x-[-1]' : ''} ${!localStream ? 'hidden' : ''}`}
           />
           {!localStream && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 gap-4">
                <VideoOff size={48} />
                <p>Camera đang tắt</p>
                <button 
-                 onClick={startCamera}
+                 onClick={() => startCamera()}
                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-medium transition-all"
                >
                  Bật Camera
                </button>
             </div>
           )}
-          <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-md text-sm font-medium">
-            Bạn (You)
+          <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-md text-sm font-medium flex items-center gap-2">
+            Bạn (You) {isScreenSharing && <span className="text-blue-400 text-xs">(Đang chia sẻ màn hình)</span>}
           </div>
         </div>
 
@@ -251,11 +346,11 @@ const App: React.FC = () => {
          
          {!peerRef.current ? (
             <>
-              <button onClick={createOffer} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
+              <button onClick={createOffer} className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
                   <Phone size={20} />
                   <span className="hidden md:inline">Tạo cuộc gọi</span>
               </button>
-              <button onClick={handleJoinCall} disabled={!localStream} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
+              <button onClick={handleJoinCall} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full font-semibold transition-all flex-shrink-0">
                   <PhoneIncoming size={20} />
                   <span className="hidden md:inline">Nhập mã gọi</span>
               </button>
@@ -280,6 +375,17 @@ const App: React.FC = () => {
                 <span className="hidden md:inline">Chia sẻ mã</span>
             </button>
         )}
+
+         {/* Screen Share Button - Only when connected or peer established */}
+         {peerRef.current && (
+             <button 
+                onClick={toggleScreenShare} 
+                className={`p-4 rounded-full transition-all flex-shrink-0 ${isScreenSharing ? 'bg-blue-600 text-white ring-2 ring-blue-400' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}
+                title={isScreenSharing ? "Dừng chia sẻ" : "Chia sẻ màn hình"}
+             >
+                <Monitor size={24} />
+             </button>
+         )}
 
          <button onClick={toggleVideo} className={`p-4 rounded-full transition-all flex-shrink-0 ${isVideoOff ? 'bg-red-500/20 text-red-500' : 'bg-gray-800 hover:bg-gray-700 text-white'}`}>
             {isVideoOff ? <VideoOff size={24} /> : <Video size={24} />}
